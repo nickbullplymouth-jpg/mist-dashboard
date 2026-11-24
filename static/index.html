@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Juniper Mist Org Operations Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+            },
+            mist: {
+              card: '#1e293b',
+              border: '#334155',
+              bg: '#0f172a'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .glow {
+      box-shadow: 0 0 15px -3px rgba(16, 185, 129, 0.25);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
+  <!-- Top Navigation -->
+  <header class="border-b border-slate-800 bg-slate-900/70 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center font-bold text-white shadow-lg shadow-emerald-500/20">
+          <i data-lucide="wifi" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+            Mist Org Monitor
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-950 text-emerald-400 border border-emerald-800/50">EU Cloud</span>
+          </h1>
+          <p id="org-name" class="text-xs text-slate-400">Loading organization...</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-4">
+        <!-- Live status indicator -->
+        <div class="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700 text-xs">
+          <span class="relative flex h-2.5 w-2.5">
+            <span id="status-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span id="status-dot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+          </span>
+          <span id="refresh-status" class="text-slate-300">Live Sync</span>
+        </div>
+
+        <button onclick="fetchData()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition border border-slate-700" title="Manual Refresh">
+          <i data-lucide="refresh-cw" class="w-4 h-4" id="refresh-icon"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    
+    <!-- Error / Config Banner -->
+    <div id="alert-banner" class="hidden p-4 rounded-xl border border-red-800 bg-red-950/50 text-red-200 flex items-start gap-3">
+      <i data-lucide="alert-circle" class="w-5 h-5 text-red-400 shrink-0 mt-0.5"></i>
+      <div>
+        <h4 class="font-semibold text-sm" id="alert-title">Configuration Warning</h4>
+        <p class="text-xs text-red-300 mt-1" id="alert-message">Please ensure MIST_API_TOKEN and MIST_ORG_ID are configured in your server environment.</p>
+      </div>
+    </div>
+
+    <!-- Quick Stats Metric Cards -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <!-- Sites -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition">
+        <div class="flex items-center justify-between text-slate-400 mb-3">
+          <span class="text-sm font-medium">Active Sites</span>
+          <div class="p-2 bg-blue-500/10 rounded-lg text-blue-400">
+            <i data-lucide="map-pin" class="w-5 h-5"></i>
+          </div>
+        </div>
+        <div class="text-3xl font-bold tracking-tight text-white" id="stat-sites">-</div>
+        <div class="text-xs text-slate-400 mt-1">Configured sites in Org</div>
+      </div>
+
+      <!-- Total APs -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition">
+        <div class="flex items-center justify-between text-slate-400 mb-3">
+          <span class="text-sm font-medium">Access Points</span>
+          <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
+            <i data-lucide="router" class="w-5 h-5"></i>
+          </div>
+        </div>
+        <div class="flex items-baseline space-x-2">
+          <div class="text-3xl font-bold tracking-tight text-white" id="stat-aps-connected">-</div>
+          <span class="text-xs text-slate-400">/ <span id="stat-aps-total">-</span> online</span>
+        </div>
+        <div class="text-xs text-emerald-400 mt-1 flex items-center gap-1">
+          <span id="stat-aps-offline" class="text-slate-400">0 offline</span>
+        </div>
+      </div>
+
+      <!-- Clients Connected -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition">
+        <div class="flex items-center justify-between text-slate-400 mb-3">
+          <span class="text-sm font-medium">Wi-Fi Clients</span>
+          <div class="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+            <i data-lucide="users" class="w-5 h-5"></i>
+          </div>
+        </div>
+        <div class="text-3xl font-bold tracking-tight text-white" id="stat-clients">-</div>
+        <div class="text-xs text-slate-400 mt-1">Active wireless associations</div>
+      </div>
+
+      <!-- Alarms -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition">
+        <div class="flex items-center justify-between text-slate-400 mb-3">
+          <span class="text-sm font-medium">Recent Alarms</span>
+          <div class="p-2 bg-amber-500/10 rounded-lg text-amber-400">
+            <i data-lucide="bell" class="w-5 h-5"></i>
+          </div>
+        </div>
+        <div class="text-3xl font-bold tracking-tight text-white" id="stat-alarms">-</div>
+        <div class="text-xs text-slate-400 mt-1">Active alarms or warnings</div>
+      </div>
+    </section>
+
+    <!-- Visual Charts & Graphs -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Device Health Status Chart -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+        <h3 class="text-base font-semibold text-white mb-1">Access Point Health</h3>
+        <p class="text-xs text-slate-400 mb-6">Real-time status breakdown</p>
+        <div class="relative h-60 flex items-center justify-center">
+          <canvas id="apStatusChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Top Sites Breakdown -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 lg:col-span-2">
+        <h3 class="text-base font-semibold text-white mb-1">Sites Overview</h3>
+        <p class="text-xs text-slate-400 mb-4">Inventory & geographic distribution</p>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm text-slate-300">
+            <thead class="text-xs uppercase bg-slate-800/60 text-slate-400">
+              <tr>
+                <th class="px-4 py-3 rounded-l-lg">Site Name</th>
+                <th class="px-4 py-3">Site ID</th>
+                <th class="px-4 py-3">Timezone</th>
+                <th class="px-4 py-3 rounded-r-lg">Country</th>
+              </tr>
+            </thead>
+            <tbody id="sites-table-body" class="divide-y divide-slate-800">
+              <tr><td colspan="4" class="px-4 py-6 text-center text-slate-500">Loading sites...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Detailed Device & Client Tables (Tabs) -->
+    <section class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
+        <div class="flex space-x-4">
+          <button id="tab-devices-btn" onclick="switchTab('devices')" class="text-sm font-semibold text-emerald-400 border-b-2 border-emerald-400 pb-1">
+            Devices & APs
+          </button>
+          <button id="tab-clients-btn" onclick="switchTab('clients')" class="text-sm font-semibold text-slate-400 hover:text-slate-200 pb-1">
+            Wireless Clients
+          </button>
+        </div>
+        <span class="text-xs text-slate-500" id="table-count-label">Displaying items</span>
+      </div>
+
+      <!-- Devices Tab -->
+      <div id="tab-devices" class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-300">
+          <thead class="text-xs uppercase bg-slate-800/60 text-slate-400">
+            <tr>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Name</th>
+              <th class="px-4 py-3">Model</th>
+              <th class="px-4 py-3">MAC / Serial</th>
+              <th class="px-4 py-3">IP Address</th>
+              <th class="px-4 py-3">Clients</th>
+            </tr>
+          </thead>
+          <tbody id="devices-table-body" class="divide-y divide-slate-800">
+            <tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">Loading devices...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Clients Tab -->
+      <div id="tab-clients" class="hidden overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-300">
+          <thead class="text-xs uppercase bg-slate-800/60 text-slate-400">
+            <tr>
+              <th class="px-4 py-3">Device / Hostname</th>
+              <th class="px-4 py-3">MAC Address</th>
+              <th class="px-4 py-3">IP Address</th>
+              <th class="px-4 py-3">SSID / WLAN</th>
+              <th class="px-4 py-3">Connected AP</th>
+              <th class="px-4 py-3">Band / RSSI</th>
+            </tr>
+          </thead>
+          <tbody id="clients-table-body" class="divide-y divide-slate-800">
+            <tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">Loading clients...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    lucide.createIcons();
+    let apChart = null;
+
+    function initChart(connected = 0, disconnected = 0) {
+      const ctx = document.getElementById('apStatusChart').getContext('2d');
+      if (apChart) {
+        apChart.destroy();
+      }
+      apChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Connected', 'Disconnected'],
+          datasets: [{
+            data: [connected, disconnected],
+            backgroundColor: ['#10b981', '#ef4444'],
+            borderWidth: 0,
+            hoverOffset: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: '#94a3b8', font: { size: 12 } }
+            }
+          },
+          cutout: '75%'
+        }
+      });
+    }
+
+    function switchTab(tab) {
+      const devTab = document.getElementById('tab-devices');
+      const cliTab = document.getElementById('tab-clients');
+      const devBtn = document.getElementById('tab-devices-btn');
+      const cliBtn = document.getElementById('tab-clients-btn');
+
+      if (tab === 'devices') {
+        devTab.classList.remove('hidden');
+        cliTab.classList.add('hidden');
+        devBtn.className = 'text-sm font-semibold text-emerald-400 border-b-2 border-emerald-400 pb-1';
+        cliBtn.className = 'text-sm font-semibold text-slate-400 hover:text-slate-200 pb-1';
+      } else {
+        cliTab.classList.remove('hidden');
+        devTab.classList.add('hidden');
+        cliBtn.className = 'text-sm font-semibold text-emerald-400 border-b-2 border-emerald-400 pb-1';
+        devBtn.className = 'text-sm font-semibold text-slate-400 hover:text-slate-200 pb-1';
+      }
+    }
+
+    async function fetchData() {
+      const refreshIcon = document.getElementById('refresh-icon');
+      refreshIcon.classList.add('animate-spin');
+
+      try {
+        // Fetch Org info
+        const orgRes = await fetch('/api/org');
+        if (orgRes.ok) {
+          const org = await orgRes.json();
+          document.getElementById('org-name').textContent = `Org: ${org.name || org.id}`;
+        }
+
+        // Fetch Main Stats
+        const statsRes = await fetch('/api/stats');
+        if (!statsRes.ok) {
+          const err = await statsRes.json();
+          throw new Error(err.detail || 'Failed to fetch Mist stats');
+        }
+        const stats = await statsRes.json();
+
+        // Populate cards
+        document.getElementById('stat-sites').textContent = stats.sites_count ?? 0;
+        document.getElementById('stat-aps-connected').textContent = stats.devices?.connected ?? 0;
+        document.getElementById('stat-aps-total').textContent = stats.devices?.total ?? 0;
+        document.getElementById('stat-aps-offline').textContent = `${stats.devices?.disconnected ?? 0} disconnected`;
+        document.getElementById('stat-clients').textContent = stats.clients?.total ?? 0;
+        document.getElementById('stat-alarms').textContent = stats.alarms?.length ?? 0;
+
+        // Render Chart
+        initChart(stats.devices?.connected || 0, stats.devices?.disconnected || 0);
+
+        // Fetch Sites
+        const sitesRes = await fetch('/api/sites');
+        if (sitesRes.ok) {
+          const sites = await sitesRes.json();
+          renderSites(sites);
+        }
+
+        // Fetch Devices
+        const devRes = await fetch('/api/devices');
+        if (devRes.ok) {
+          const devices = await devRes.json();
+          renderDevices(devices);
+        }
+
+        // Fetch Clients
+        const cliRes = await fetch('/api/clients');
+        if (cliRes.ok) {
+          const clients = await cliRes.json();
+          renderClients(clients);
+        }
+
+        document.getElementById('alert-banner').classList.add('hidden');
+      } catch (err) {
+        console.error(err);
+        const banner = document.getElementById('alert-banner');
+        document.getElementById('alert-title').textContent = "Mist API Notice";
+        document.getElementById('alert-message').textContent = err.message;
+        banner.classList.remove('hidden');
+      } finally {
+        setTimeout(() => refreshIcon.classList.remove('animate-spin'), 600);
+      }
+    }
+
+    function renderSites(sites) {
+      const tbody = document.getElementById('sites-table-body');
+      if (!Array.isArray(sites) || sites.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-4 text-center text-slate-500">No sites found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = sites.slice(0, 10).map(s => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="px-4 py-3 font-medium text-white">${s.name || 'Unnamed'}</td>
+          <td class="px-4 py-3 font-mono text-xs text-slate-400">${s.id}</td>
+          <td class="px-4 py-3 text-slate-400">${s.timezone || 'UTC'}</td>
+          <td class="px-4 py-3 text-slate-400">${s.country_code || '-'}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderDevices(devices) {
+      const tbody = document.getElementById('devices-table-body');
+      if (!Array.isArray(devices) || devices.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-4 text-center text-slate-500">No devices reporting</td></tr>';
+        return;
+      }
+      tbody.innerHTML = devices.slice(0, 30).map(d => {
+        const isOnline = d.status === 'connected';
+        return `
+          <tr class="hover:bg-slate-800/40">
+            <td class="px-4 py-3">
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${isOnline ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50' : 'bg-red-950 text-red-400 border border-red-800/50'}">
+                <span class="w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-red-400'}"></span>
+                ${isOnline ? 'Connected' : 'Offline'}
+              </span>
+            </td>
+            <td class="px-4 py-3 font-medium text-white">${d.name || d.mac || 'AP'}</td>
+            <td class="px-4 py-3 text-slate-400">${d.model || '-'}</td>
+            <td class="px-4 py-3 font-mono text-xs text-slate-400">${d.mac || d.serial || '-'}</td>
+            <td class="px-4 py-3 font-mono text-xs text-slate-400">${d.ip || '-'}</td>
+            <td class="px-4 py-3 text-slate-300 font-semibold">${d.num_clients ?? 0}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderClients(clients) {
+      const tbody = document.getElementById('clients-table-body');
+      if (!Array.isArray(clients) || clients.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-4 text-center text-slate-500">No active clients</td></tr>';
+        return;
+      }
+      tbody.innerHTML = clients.slice(0, 30).map(c => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="px-4 py-3 font-medium text-white">${c.hostname || c.name || 'Anonymous Client'}</td>
+          <td class="px-4 py-3 font-mono text-xs text-slate-400">${c.mac || '-'}</td>
+          <td class="px-4 py-3 font-mono text-xs text-slate-400">${c.ip || '-'}</td>
+          <td class="px-4 py-3 text-slate-400">${c.ssid || '-'}</td>
+          <td class="px-4 py-3 text-slate-400">${c.ap_name || c.ap_mac || '-'}</td>
+          <td class="px-4 py-3 text-slate-400">${c.band || ''} ${c.rssi ? `(${c.rssi} dBm)` : '-'}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Auto-refresh every 30s
+    fetchData();
+    setInterval(fetchData, 30000);
+  </script>
+</body>
+</html>
